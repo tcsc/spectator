@@ -42,6 +42,9 @@ defmodule Spectator.Multicast do
     end
 
     @spec format_packet(String, String, integer) :: binary
+    @doc """
+    Formats a discovery packet into a binary, ready for sending.
+    """
     def format_packet(nodestring, cookie, salt) do
         protocol_version = 0
         len = byte_size nodestring
