@@ -14,20 +14,23 @@ defmodule Spectator.Multicast do
         {:ok, pid}
     end
 
+    @spec announce() :: nil
     def announce do
         GenServer.call(__MODULE__, :look_around)
     end
 
-    @spec port :: integer
+    @spec port() :: integer
     @doc """
-    Fetches the port that the defaut scpectator instance if broadcasting on.
+    Fetches the port that the defaut spectator instance is listening and 
+    broadcasting on.
     """
-    def port do 
-        port(__MODULE__) 
-    end
+    def port, do: port(__MODULE__)
 
-    @spec port(pid) :: integer
-    def port(pid) do
+    @spec port(pid | atom) :: term
+    @doc """
+    Fetches the port number of a given multicast listener.
+    """
+    def port(pid) do 
         GenServer.call(pid, :get_port)
     end 
 
@@ -57,7 +60,7 @@ defmodule Spectator.Multicast do
         cookie = to_string :erlang.get_cookie
         node = to_string :erlang.node
         pkt = format_packet node, cookie, salt
-        :gen_udp.send state(s, :tx), state(s, :addr), state(s, :port), pkt
+        :ok = :gen_udp.send state(s, :tx), state(s, :addr), state(s, :port), pkt
         {:reply, nil, s}
     end
 
@@ -115,7 +118,7 @@ defmodule Spectator.Multicast do
     ## 
     ## ------------------------------------------------------------------------
 
-    @spec format_packet(String, String, integer) :: binary
+    @spec format_packet(String.t, String.t, integer) :: << _ :: _ * 8>>
     @doc """
     Formats a discovery packet into a binary, ready for sending.
     """
@@ -131,7 +134,7 @@ defmodule Spectator.Multicast do
            nodestring :: binary >>
     end
 
-    @spec parse_packet(binary) :: {:ok, {integer, binary, String}} | :error
+    @spec parse_packet(binary) :: {:ok, {integer, <<_ :: 128>>, String.t}} | :error
     @doc """
     Attempts to parse a binary as a discovery packet. 
     """
@@ -148,7 +151,7 @@ defmodule Spectator.Multicast do
         end
     end
 
-    @spec check_cookie(String, integer, binary) :: boolean
+    @spec check_cookie(String.t, integer, <<_ :: 128>>) :: boolean
     @doc """
     Checks to see if a cookie hash matches a packet supplied hash.
     """
