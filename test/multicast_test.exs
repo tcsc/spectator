@@ -2,11 +2,6 @@ defmodule MulticastTest do
   use ExUnit.Case
   alias Spectator.Multicast
 
-  setup context do
-    on_exit fn ->
-      Application.St
-  end
-
   test "packets are formatted as expected" do
     pkt = Multicast.format_packet("name@node", "cookie", 12345)
     exp = <<"spectator", 
@@ -40,26 +35,28 @@ defmodule MulticastTest do
     assert not Multicast.check_cookie "someothercookie", salt, hash
   end
 
-  test "invoking discover sends a valid packet" do
-    {:ok, pid} = Multicast.start_link {0,0,0,0}, 4475, 5, 300
-    try do
-      {:ok, rx} = :gen_udp.open port, [
+  test "invoking announce sends a valid packet" do
+    IO.puts "#{inspect self}: test_begin"
+
+    port = Multicast.port
+    addr = {0,0,0,0}
+    {:ok, rx} = :gen_udp.open port, [
         active: true,
         ip: {0,0,0,0},
         add_membership: {addr, {0,0,0,0}},
         multicast_loop: true,
         reuseaddr: true,
         mode: :binary
-      ]
-      Multicast.discover pid
-
+    ]
+    try do
+      Multicast.announce
       receive do
-        {:udp, _, 4475, _, <<"spactator", _ :: binary>>} -> assert true
+        {:udp, _, _, _, <<"spectator", _ :: binary>>} -> assert true
       after
         1000 -> assert false
       end
     after
-      Multicast.stop()
+      :gen_udp.close(rx)
     end
   end
 end

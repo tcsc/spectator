@@ -1,45 +1,119 @@
 defmodule Spectator.Multicast do
     use GenServer
     require Record
+    require Logger
 
-    Record.defrecord :state, tx: nil, rx: nil
+    Record.defrecord :state, tx: nil, 
+                             rx: nil, 
+                             addr: {0, 0, 0, 0}, 
+                             port: 0
 
     def start_link(addr, port, ttl, timeout) do
-        GenServer.start_link(__MODULE__, [addr, port, ttl, timeout], name: __MODULE__)
+        {:ok, pid} = GenServer.start_link(__MODULE__, [addr, port, ttl, timeout], name: __MODULE__)
+        announce
+        {:ok, pid}
     end
 
-    def discover do
+    def announce do
         GenServer.call(__MODULE__, :look_around)
     end
+
+    @spec port :: integer
+    @doc """
+    Fetches the port that the defaut scpectator instance if broadcasting on.
+    """
+    def port do 
+        port(__MODULE__) 
+    end
+
+    @spec port(pid) :: integer
+    def port(pid) do
+        GenServer.call(pid, :get_port)
+    end 
+
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
 
     def init([addr, port, ttl, timeout]) do
         socket_options = [
             active: true,
             ip: addr,
             add_membership: {addr, {0,0,0,0}},
-            multicast_loop: true,
             reuseaddr: true,
             mode: :binary
         ]
 
         {:ok, rx} = :gen_udp.open(port, socket_options)
-        {:ok, state(tx: mk_send_socket(ttl), rx: rx)}
+        {:ok, state(tx: mk_send_socket(ttl), rx: rx, port: port, addr: addr)}
     end
 
-    def handle_call(:look_around, _from, _state) do
-        IO.puts "handle_call(:look_around, #{inspect _from}, #{inspect _state}])"
-        {:ok, _state}
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
+
+    def handle_call(:look_around, _from, s) do
+        salt = :crypto.rand_uniform 0, 0x7FFFFFFF
+        cookie = to_string :erlang.get_cookie
+        node = to_string :erlang.node
+        pkt = format_packet node, cookie, salt
+        :gen_udp.send state(s, :tx), state(s, :addr), state(s, :port), pkt
+        {:reply, nil, s}
     end
 
-    def terminate(_state) do
-        IO.puts "terminate(#{inspect _state}])"
+    def handle_call(:get_port, _from, s) do
+        {:reply, state(s, :port), s}
     end
 
-    def mk_send_socket(ttl) do
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
+
+    # Handles a UDP packet from the reception socket.
+    def handle_info({:udp, _sock, _src, _port, pkt}, s) do 
+        handle_packet(pkt)
+        {:noreply, s}
+    end
+
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
+
+    def terminate(s) do
+        :gen_udp.close state(s, :tx)
+        :gen_udp.close state(s, :rx)
+        :ok
+    end
+
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
+
+    defp mk_send_socket(ttl) do
         opts = [ip: {0,0,0,0}, multicast_ttl: ttl, multicast_loop: true]
         {:ok, s} = :gen_udp.open(0, opts)
         s
     end
+
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
+
+    defp handle_packet(pkt) do
+        case parse_packet pkt do
+            {:ok, {salt, hash, other_node}} ->
+                my_cookie = to_string :erlang.get_cookie
+                if check_cookie my_cookie, salt, hash do
+                    Logger.info "Spectator: Welcome, #{other_node}"
+                    :net_adm.ping (String.to_atom other_node)
+                end
+            :error -> nil
+        end
+    end
+
+    ## ------------------------------------------------------------------------
+    ## 
+    ## ------------------------------------------------------------------------
 
     @spec format_packet(String, String, integer) :: binary
     @doc """
